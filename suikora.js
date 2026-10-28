@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  console.log('[Suikora AdShield] Script de GitHub ejecutado.');
+  console.log('[Suikora AdShield] Script activo.');
 
   // 1. Blindaje total de window.open contra popunders y nuevas pestañas publicitarias
   const originalOpen = window.open;
@@ -12,7 +12,7 @@
     if (typeof url === 'string' && (url.includes('whatsapp.com') || url.includes('t.me'))) {
       return originalOpen.apply(this, arguments);
     }
-    console.warn('[Suikora AdShield] Pestaña/Popunder publicitario neutralizado:', url);
+    console.warn('[Suikora AdShield] Ventana emergente bloqueada:', url);
     return {
       document: { write: () => {} },
       location: { href: '', replace: () => {} },
@@ -22,7 +22,7 @@
     };
   };
 
-  // 2. Bloquear clics simulados mediante etiquetas <a> invisibles
+  // 2. Bloquear clics simulados mediante etiquetas <a> invisibles de publicidad
   const originalAnchorClick = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function () {
     const href = this.href || '';
@@ -32,15 +32,72 @@
       !href.includes('whatsapp.com') &&
       !href.includes('t.me')
     ) {
-      console.warn('[Suikora AdShield] Intento de clic simulado bloqueado:', href);
+      console.warn('[Suikora AdShield] Clic simulado bloqueado:', href);
       return;
     }
     return originalAnchorClick.apply(this, arguments);
   };
 
-  // 3. Evitar secuestro de toques en la pantalla (pantalla táctil / click)
-  const blockAdEvent = function (e) {
-    const link = e.target?.closest?.('a');
+  // 3. Destruir capas invisibles superpuestas (Transparent Overlays que secuestran toques)
+  const killInvisibleOverlays = () => {
+    // Buscar por IDs conocidos del script de popunders
+    document.querySelectorAll('[id*="transp"], [id*="popunder"], [id*="dom3ic"]').forEach((el) => {
+      console.warn('[Suikora AdShield] Capa transparente eliminada por ID:', el.id);
+      el.remove();
+    });
+
+    // Buscar cualquier elemento invisible o transparente de pantalla completa
+    document.querySelectorAll('div, a').forEach((el) => {
+      if (el.id === 'suikora-adshield-toast') return;
+      const s = window.getComputedStyle(el);
+      if (s.position === 'fixed' || s.position === 'absolute') {
+        const opacity = parseFloat(s.opacity);
+        const zIndex = parseInt(s.zIndex, 10);
+        // Si tiene z-index alto y es transparente (opacidad 0) o cubre casi toda la pantalla
+        if ((opacity === 0 || s.visibility === 'hidden') && zIndex >= 100) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width > window.innerWidth * 0.6 && rect.height > window.innerHeight * 0.6) {
+            console.warn('[Suikora AdShield] Capa invisible gigante eliminada del DOM');
+            el.remove();
+          }
+        }
+      }
+    });
+
+    // Eliminar iframes publicitarios
+    document.querySelectorAll('iframe[src*="abscloud"], iframe[src*="mamshirt"], iframe[src*="bauval"], iframe[src*="hai8g"]').forEach((f) => f.remove());
+
+    // Diálogos de adblock
+    document.querySelectorAll('dialog').forEach((d) => {
+      if (d.querySelector('#sk-nota-title') || d.innerText.includes('bloqueador de anuncios')) {
+        d.close();
+        d.remove();
+        document.body.style.overflow = '';
+      }
+    });
+  };
+
+  // Ejecutar limpieza de capas inmediatamente y periódicamente
+  killInvisibleOverlays();
+  setInterval(killInvisibleOverlays, 500);
+
+  // 4. Interceptar toques y clics en fase de captura (Evita que el toque llegue al script de publicidad)
+  const blockAdTouch = function (e) {
+    const target = e.target;
+    if (!target) return;
+
+    // Si tocaron una capa transparente
+    if (target.id && (target.id.includes('transp') || target.id.includes('dom3ic'))) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      target.remove();
+      console.warn('[Suikora AdShield] Toque en capa transparente bloqueado');
+      return false;
+    }
+
+    // Si tocaron un enlace con target="_blank" publicitario
+    const link = target.closest('a');
     if (link && link.href) {
       if (
         link.target === '_blank' &&
@@ -49,7 +106,9 @@
       ) {
         e.preventDefault();
         e.stopPropagation();
+        e.stopImmediatePropagation();
         console.warn('[Suikora AdShield] Toque en enlace emergente bloqueado:', link.href);
+        link.remove();
         return false;
       }
       if (
@@ -61,32 +120,20 @@
       ) {
         e.preventDefault();
         e.stopPropagation();
-        console.warn('[Suikora AdShield] Clic publicitario bloqueado:', link.href);
+        e.stopImmediatePropagation();
+        console.warn('[Suikora AdShield] Clic en red publicitaria bloqueado:', link.href);
+        link.remove();
         return false;
       }
     }
   };
 
-  document.addEventListener('click', blockAdEvent, true);
-  document.addEventListener('touchend', blockAdEvent, true);
-  document.addEventListener('pointerup', blockAdEvent, true);
+  ['click', 'touchstart', 'touchend', 'pointerdown', 'pointerup', 'mousedown'].forEach((evt) => {
+    window.addEventListener(evt, blockAdTouch, true);
+    document.addEventListener(evt, blockAdTouch, true);
+  });
 
-  // 4. Limpiar iframes y elementos publicitarios invisibles
-  const cleanAdElements = () => {
-    // Diálogos de adblock
-    document.querySelectorAll('dialog').forEach((d) => {
-      if (d.querySelector('#sk-nota-title') || d.innerText.includes('bloqueador de anuncios')) {
-        d.close();
-        d.remove();
-        document.body.style.overflow = '';
-      }
-    });
-    // Elementos iframe o capas invisibles de anuncios de terceros
-    document.querySelectorAll('iframe[src*="abscloud"], iframe[src*="mamshirt"], iframe[src*="bauval"]').forEach((f) => f.remove());
-  };
-  setInterval(cleanAdElements, 600);
-
-  // 5. Inyección en Turbopack para activar y fijar permanentemente el estado Premium
+  // 5. Inyección nativa en Turbopack para activar y fijar permanentemente el estado Premium
   let hijacked = false;
 
   function injectPremiumUnlock() {
@@ -188,7 +235,6 @@
     }, 4000);
   }
 
-  // Intentar aplicar inmediatamente y por intervalos
   injectPremiumUnlock();
   const checkTimer = setInterval(() => {
     if (injectPremiumUnlock()) {

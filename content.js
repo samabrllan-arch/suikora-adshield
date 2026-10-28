@@ -4,17 +4,15 @@
 (function () {
   'use strict';
 
-  console.log('[Suikora AdShield] Extensión iniciada.');
+  console.log('[Suikora AdShield] Extensión activa.');
 
   // 1. Blindaje total de window.open contra popunders y nuevas pestañas publicitarias
   const originalOpen = window.open;
   window.open = function (url) {
-    // Permitir únicamente enlaces explícitos a WhatsApp o Telegram
     if (typeof url === 'string' && (url.includes('whatsapp.com') || url.includes('t.me'))) {
       return originalOpen.apply(this, arguments);
     }
-    console.warn('[Suikora AdShield] Pestaña/Popunder publicitario neutralizado:', url);
-    // Devolver objeto ventana simulado para evitar que el script publicitario falle si accede a .location
+    console.warn('[Suikora AdShield] Ventana emergente bloqueada:', url);
     return {
       document: { write: () => {} },
       location: { href: '', replace: () => {} },
@@ -24,7 +22,7 @@
     };
   };
 
-  // 2. Bloquear enlaces dinámicos invisibles que los anuncios crean para simular clics
+  // 2. Bloquear clics simulados mediante etiquetas <a> invisibles de publicidad
   const originalAnchorClick = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function () {
     const href = this.href || '';
@@ -34,49 +32,38 @@
       !href.includes('whatsapp.com') &&
       !href.includes('t.me')
     ) {
-      console.warn('[Suikora AdShield] Intento de clic simulado bloqueado:', href);
+      console.warn('[Suikora AdShield] Clic simulado bloqueado:', href);
       return;
     }
     return originalAnchorClick.apply(this, arguments);
   };
 
-  // 3. Interceptar cualquier clic o toque en banners y enlaces externos _blank
-  document.addEventListener(
-    'click',
-    function (e) {
-      const link = e.target?.closest?.('a');
-      if (link && link.href) {
-        if (
-          link.target === '_blank' &&
-          !link.href.includes('whatsapp.com') &&
-          !link.href.includes('t.me')
-        ) {
-          e.preventDefault();
-          e.stopPropagation();
-          console.warn('[Suikora AdShield] Clic en enlace emergente bloqueado:', link.href);
-          return false;
-        }
-        if (
-          link.href.includes('mamshirt.com') ||
-          link.href.includes('bauval.org') ||
-          link.href.includes('pleased-report.com') ||
-          link.href.includes('abscloud.org') ||
-          link.href.includes('hai8g.com')
-        ) {
-          e.preventDefault();
-          e.stopPropagation();
-          console.warn('[Suikora AdShield] Clic publicitario bloqueado:', link.href);
-          return false;
+  // 3. Destruir capas invisibles superpuestas (Transparent Overlays que secuestran toques)
+  const killInvisibleOverlays = () => {
+    document.querySelectorAll('[id*="transp"], [id*="popunder"], [id*="dom3ic"]').forEach((el) => {
+      console.warn('[Suikora AdShield] Capa transparente eliminada por ID:', el.id);
+      el.remove();
+    });
+
+    document.querySelectorAll('div, a').forEach((el) => {
+      if (el.id === 'suikora-adshield-toast') return;
+      const s = window.getComputedStyle(el);
+      if (s.position === 'fixed' || s.position === 'absolute') {
+        const opacity = parseFloat(s.opacity);
+        const zIndex = parseInt(s.zIndex, 10);
+        if ((opacity === 0 || s.visibility === 'hidden') && zIndex >= 100) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width > window.innerWidth * 0.6 && rect.height > window.innerHeight * 0.6) {
+            console.warn('[Suikora AdShield] Capa invisible gigante eliminada del DOM');
+            el.remove();
+          }
         }
       }
-    },
-    true
-  );
+    });
 
-  // 4. Ocultar y cerrar automáticamente cualquier diálogo de detección de adblock
-  const hideAdblockDialog = () => {
-    const dialogs = document.querySelectorAll('dialog');
-    dialogs.forEach((d) => {
+    document.querySelectorAll('iframe[src*="abscloud"], iframe[src*="mamshirt"], iframe[src*="bauval"], iframe[src*="hai8g"]').forEach((f) => f.remove());
+
+    document.querySelectorAll('dialog').forEach((d) => {
       if (d.querySelector('#sk-nota-title') || d.innerText.includes('bloqueador de anuncios')) {
         d.close();
         d.remove();
@@ -84,7 +71,59 @@
       }
     });
   };
-  setInterval(hideAdblockDialog, 600);
+
+  killInvisibleOverlays();
+  setInterval(killInvisibleOverlays, 500);
+
+  // 4. Interceptar toques y clics en fase de captura (Evita que el toque llegue al script de publicidad)
+  const blockAdTouch = function (e) {
+    const target = e.target;
+    if (!target) return;
+
+    if (target.id && (target.id.includes('transp') || target.id.includes('dom3ic'))) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      target.remove();
+      console.warn('[Suikora AdShield] Toque en capa transparente bloqueado');
+      return false;
+    }
+
+    const link = target.closest('a');
+    if (link && link.href) {
+      if (
+        link.target === '_blank' &&
+        !link.href.includes('whatsapp.com') &&
+        !link.href.includes('t.me')
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        console.warn('[Suikora AdShield] Toque en enlace emergente bloqueado:', link.href);
+        link.remove();
+        return false;
+      }
+      if (
+        link.href.includes('mamshirt.com') ||
+        link.href.includes('bauval.org') ||
+        link.href.includes('pleased-report.com') ||
+        link.href.includes('abscloud.org') ||
+        link.href.includes('hai8g.com')
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        console.warn('[Suikora AdShield] Clic en red publicitaria bloqueado:', link.href);
+        link.remove();
+        return false;
+      }
+    }
+  };
+
+  ['click', 'touchstart', 'touchend', 'pointerdown', 'pointerup', 'mousedown'].forEach((evt) => {
+    window.addEventListener(evt, blockAdTouch, true);
+    document.addEventListener(evt, blockAdTouch, true);
+  });
 
   // 5. Inyección nativa en Turbopack para activar y fijar permanentemente el estado Premium
   let hijacked = false;
@@ -102,13 +141,11 @@
           let mod = null;
           let modId = null;
 
-          // Intentar ID conocido (33235)
           try {
             mod = ctx.i(33235);
             modId = 33235;
           } catch (e) {}
 
-          // Si el ID cambió en una actualización, buscarlo dinámicamente
           if ((!mod || typeof mod.z !== 'function') && ctx.M) {
             for (const id of ctx.M.keys()) {
               try {
@@ -129,15 +166,13 @@
           if (mod && typeof mod.z === 'function') {
             const origZ = mod.z;
 
-            // Activar premium inmediatamente
             origZ(true);
 
-            // Secuestrar la caché del módulo para que NINGÚN componente (como SiteNav) lo regrese a false
             if (ctx.c && modId && ctx.c.has(modId)) {
               const entry = ctx.c.get(modId);
               const fakeExports = {
                 z: function () {
-                  origZ(true); // Siempre forzar true
+                  origZ(true);
                 },
                 L: function () {
                   return { known: true, premium: true };
@@ -147,12 +182,10 @@
               entry.namespaceObject = fakeExports;
             }
 
-            // Refuerzo periódico por si React monta nuevos árboles
             setInterval(() => {
               origZ(true);
             }, 800);
 
-            // Forzar actualización de React en la interfaz
             window.dispatchEvent(new Event('resize'));
             document.dispatchEvent(new Event('visibilitychange'));
 
@@ -175,7 +208,6 @@
     }
   }
 
-  // Notificación visual en pantalla
   function showToast(text) {
     if (document.getElementById('suikora-adshield-toast')) return;
     const toast = document.createElement('div');
@@ -190,7 +222,6 @@
     }, 4000);
   }
 
-  // Intentar aplicar hasta que cargue Turbopack
   const checkTimer = setInterval(() => {
     if (injectPremiumUnlock()) {
       clearInterval(checkTimer);
