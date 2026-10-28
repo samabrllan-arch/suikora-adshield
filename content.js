@@ -4,41 +4,40 @@
 (function () {
   'use strict';
 
-  console.log('[Suikora AdShield] Extensión activa - Iniciando protección...');
+  console.log('[Suikora AdShield] Extensión activa - Modo Seguro.');
 
-  // 1. Estilos CSS agresivos para destruir capas invisibles y overlays de popunders
+  // 1. Estilos CSS no invasivos para neutralizar capas invisibles de anuncios
   const injectKillerCSS = () => {
-    if (document.getElementById('sk-killer-css')) return;
-    const style = document.createElement('style');
-    style.id = 'sk-killer-css';
-    style.textContent = `
-      div[style*="2147483650"],
-      div[style*="--rdata"],
-      div[style*="3000"],
-      div[style*="opacity: .01"],
-      div[style*="opacity: 0.01"],
-      div[class^="pt"][style*="fixed"],
-      a[id^="lk"],
-      a[target="_blank"]:not([href*="whatsapp.com"]):not([href*="t.me"]),
-      iframe[src*="abscloud"],
-      iframe[src*="mamshirt"],
-      iframe[src*="bauval"],
-      iframe[src*="hai8g"],
-      iframe[src*="pleased-report"],
-      dialog:has(#sk-nota-title) {
-        display: none !important;
-        pointer-events: none !important;
-        visibility: hidden !important;
-        position: absolute !important;
-        top: -99999px !important;
-        left: -99999px !important;
-        width: 0 !important;
-        height: 0 !important;
-        opacity: 0 !important;
-        z-index: -999999 !important;
+    try {
+      if (document.getElementById('sk-killer-css')) return;
+      const style = document.createElement('style');
+      style.id = 'sk-killer-css';
+      style.textContent = `
+        div[style*="2147483650"],
+        div[style*="--rdata"],
+        iframe[src*="abscloud"],
+        iframe[src*="mamshirt"],
+        iframe[src*="bauval"],
+        iframe[src*="hai8g"],
+        iframe[src*="pleased-report"] {
+          display: none !important;
+          pointer-events: none !important;
+          visibility: hidden !important;
+          width: 0 !important;
+          height: 0 !important;
+          opacity: 0 !important;
+          z-index: -999999 !important;
+        }
+      `;
+      const target = document.head || document.documentElement;
+      if (target) {
+        target.appendChild(style);
+      } else {
+        document.addEventListener('DOMContentLoaded', () => {
+          (document.head || document.documentElement).appendChild(style);
+        });
       }
-    `;
-    (document.head || document.documentElement).appendChild(style);
+    } catch (e) {}
   };
   injectKillerCSS();
 
@@ -52,7 +51,7 @@
   };
 
   const originalOpen = window.open;
-  const safeOpen = function (url) {
+  window.open = function (url) {
     if (typeof url === 'string' && (url.includes('whatsapp.com') || url.includes('t.me'))) {
       return originalOpen ? originalOpen.apply(this, arguments) : dummyWindow;
     }
@@ -61,162 +60,77 @@
   };
 
   try {
-    window.open = safeOpen;
-    if (window.top && window.top !== window) window.top.open = safeOpen;
-    if (window.parent && window.parent !== window) window.parent.open = safeOpen;
+    if (window.top && window.top !== window) window.top.open = window.open;
+    if (window.parent && window.parent !== window) window.parent.open = window.open;
   } catch (e) {}
 
-  // 3. Interceptar setter de a.href y setAttribute para desarmar URLs publicitarias
-  try {
-    const origHrefDesc = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'href');
-    if (origHrefDesc && origHrefDesc.set) {
-      Object.defineProperty(HTMLAnchorElement.prototype, 'href', {
-        get: function () {
-          return origHrefDesc.get.call(this);
-        },
-        set: function (val) {
-          if (typeof val === 'string' && isAdUrl(val)) {
-            console.warn('[Suikora AdShield] Enlace publicitario desarmado:', val);
-            return origHrefDesc.set.call(this, 'javascript:void(0)');
-          }
-          return origHrefDesc.set.call(this, val);
-        },
-        configurable: true
-      });
-    }
-
-    const origSetAttr = Element.prototype.setAttribute;
-    Element.prototype.setAttribute = function (name, val) {
-      if (name === 'href' && typeof val === 'string' && isAdUrl(val)) {
-        console.warn('[Suikora AdShield] setAttribute publicitario desarmado:', val);
-        return origSetAttr.call(this, 'href', 'javascript:void(0)');
-      }
-      return origSetAttr.apply(this, arguments);
-    };
-  } catch (e) {}
-
-  // 4. Bloquear a.click() simulado por scripts de publicidad
+  // 3. Bloquear clics simulados mediante etiquetas <a> de publicidad
   const originalAnchorClick = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function () {
-    const href = this.href || this.getAttribute('href') || '';
-    if (isAdUrl(href) || (this.target === '_blank' && !href.includes('whatsapp.com') && !href.includes('t.me'))) {
+    const href = this.href || '';
+    if (
+      href &&
+      !href.startsWith(window.location.origin) &&
+      !href.startsWith('/') &&
+      !href.startsWith('#') &&
+      !href.includes('whatsapp.com') &&
+      !href.includes('t.me')
+    ) {
       console.warn('[Suikora AdShield] a.click() simulado bloqueado:', href);
       return;
     }
     return originalAnchorClick.apply(this, arguments);
   };
 
-  function isAdUrl(url) {
-    if (!url || typeof url !== 'string') return false;
-    if (url.startsWith('/') || url.startsWith('#') || url.startsWith('javascript:')) return false;
-    if (url.startsWith(window.location.origin)) return false;
-    if (url.includes('whatsapp.com') || url.includes('t.me')) return false;
-    if (
-      url.includes('abscloud.org') ||
-      url.includes('pleased-report.com') ||
-      url.includes('hai8g.com') ||
-      url.includes('mamshirt.com') ||
-      url.includes('bauval.org') ||
-      url.includes('nresystems.com') ||
-      url.includes('araplhn.org') ||
-      url.includes('/api/go')
-    ) {
-      return true;
-    }
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      return true;
-    }
-    return false;
-  }
+  // 4. Interceptar clics y toques publicitarios en fase de captura (sin tocar prototipos)
+  const blockAdClick = function (e) {
+    const target = e.target;
+    if (!target) return;
 
-  // 5. Inutilizar document.body.onclick
-  const neutralizeBodyClick = () => {
-    if (document.body) {
-      document.body.onclick = null;
-      try {
-        Object.defineProperty(document.body, 'onclick', {
-          get: () => null,
-          set: () => {},
-          configurable: true
-        });
-      } catch (e) {}
+    // Si el usuario toca la capa de popunder transparente
+    const style = target.getAttribute ? (target.getAttribute('style') || '') : '';
+    if (style.includes('2147483650') || style.includes('--rdata')) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      target.remove();
+      console.warn('[Suikora AdShield] Toque en capa publicitaria bloqueado');
+      return false;
+    }
+
+    // Si el clic es en un enlace que lleva a redes publicitarias
+    const link = target.closest ? target.closest('a') : null;
+    if (link && link.href) {
+      const h = link.href;
+      if (
+        h.includes('abscloud.org') ||
+        h.includes('pleased-report.com') ||
+        h.includes('hai8g.com') ||
+        h.includes('mamshirt.com') ||
+        h.includes('bauval.org') ||
+        h.includes('araplhn.org') ||
+        h.includes('/api/go')
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        link.remove();
+        console.warn('[Suikora AdShield] Clic en red publicitaria bloqueado:', h);
+        return false;
+      }
     }
   };
-  neutralizeBodyClick();
 
-  // 6. Detección y eliminación de elementos publicitarios del DOM
-  function isAdNode(node) {
-    if (!node || node.nodeType !== 1) return false;
-    if (node.id === 'suikora-adshield-toast' || node.id === 'sk-killer-css') return false;
+  ['click', 'touchstart', 'touchend', 'pointerdown', 'mousedown'].forEach((evt) => {
+    window.addEventListener(evt, blockAdClick, true);
+  });
 
-    if (node.tagName === 'SCRIPT' || node.tagName === 'IFRAME') {
-      const src = node.src || node.getAttribute('src') || '';
-      if (
-        src.includes('abscloud') ||
-        src.includes('mamshirt') ||
-        src.includes('bauval') ||
-        src.includes('hai8g') ||
-        src.includes('pleased-report') ||
-        src.includes('araplhn')
-      ) {
-        return true;
-      }
-    }
-
-    const styleAttr = node.getAttribute ? (node.getAttribute('style') || '') : '';
-    if (
-      styleAttr.includes('2147483650') ||
-      styleAttr.includes('--rdata') ||
-      styleAttr.includes('3000') ||
-      (node.id && node.id.startsWith('lk')) ||
-      (typeof node.className === 'string' && node.className.startsWith('pt') && styleAttr.includes('fixed'))
-    ) {
-      return true;
-    }
-
-    const s = node.style;
-    if (s && (s.position === 'fixed' || styleAttr.includes('fixed'))) {
-      const z = parseInt(s.zIndex, 10);
-      const op = parseFloat(s.opacity);
-      if ((op <= 0.05 || s.visibility === 'hidden') && (z >= 100 || isNaN(z))) {
-        return true;
-      }
-    }
-
-    if (node.tagName === 'A') {
-      const href = node.href || node.getAttribute('href') || '';
-      if (isAdUrl(href)) return true;
-      if (node.target === '_blank' && !href.includes('whatsapp.com') && !href.includes('t.me')) return true;
-    }
-
-    return false;
-  }
-
-  try {
-    const origAppendChild = Node.prototype.appendChild;
-    Node.prototype.appendChild = function (child) {
-      if (child && child.nodeType === 1 && isAdNode(child)) {
-        console.warn('[Suikora AdShield] appendChild bloqueado:', child);
-        return child;
-      }
-      return origAppendChild.apply(this, arguments);
-    };
-
-    const origInsertBefore = Node.prototype.insertBefore;
-    Node.prototype.insertBefore = function (newNode, refNode) {
-      if (newNode && newNode.nodeType === 1 && isAdNode(newNode)) {
-        console.warn('[Suikora AdShield] insertBefore bloqueado:', newNode);
-        return newNode;
-      }
-      return origInsertBefore.apply(this, arguments);
-    };
-  } catch (e) {}
-
-  const purgeExistingAds = () => {
-    document.querySelectorAll('div, a, iframe, script').forEach((el) => {
-      if (isAdNode(el)) {
-        el.remove();
-      }
+  // 5. Purga periódica y observación limpia de elementos publicitarios
+  const purgeAds = () => {
+    document.querySelectorAll(
+      'div[style*="2147483650"], div[style*="--rdata"], iframe[src*="abscloud"], iframe[src*="mamshirt"], iframe[src*="bauval"], iframe[src*="hai8g"], script[src*="abscloud"], script[src*="mamshirt"], script[src*="bauval"], script[src*="hai8g"]'
+    ).forEach((el) => {
+      el.remove();
     });
 
     document.querySelectorAll('dialog').forEach((d) => {
@@ -228,46 +142,26 @@
     });
   };
 
-  purgeExistingAds();
-  setInterval(purgeExistingAds, 400);
+  purgeAds();
+  setInterval(purgeAds, 500);
 
-  // 7. Interceptar eventos táctiles y clics en fase de captura
-  const blockTouchHijack = function (e) {
-    const target = e.target;
-    if (!target) return;
-
-    if (isAdNode(target)) {
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-      target.remove();
-      console.warn('[Suikora AdShield] Toque en capa publicitaria interceptado y bloqueado');
-      return false;
-    }
-
-    const link = target.closest ? target.closest('a') : null;
-    if (link) {
-      const href = link.href || link.getAttribute('href') || '';
-      if (
-        isAdUrl(href) ||
-        (link.target === '_blank' && !href.includes('whatsapp.com') && !href.includes('t.me'))
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        link.remove();
-        console.warn('[Suikora AdShield] Clic en enlace publicitario interceptado:', href);
-        return false;
+  try {
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType === 1) {
+            const s = node.getAttribute ? (node.getAttribute('style') || '') : '';
+            if (s.includes('2147483650') || s.includes('--rdata')) {
+              node.remove();
+            }
+          }
+        }
       }
-    }
-  };
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  } catch (e) {}
 
-  ['click', 'touchstart', 'touchend', 'pointerdown', 'pointerup', 'mousedown'].forEach((evt) => {
-    window.addEventListener(evt, blockTouchHijack, true);
-    document.addEventListener(evt, blockTouchHijack, true);
-  });
-
-  // 8. Inyección nativa en Turbopack para activar y fijar permanentemente el estado Premium
+  // 6. Inyección nativa en Turbopack para activar el estado Premium sin romper los Hooks de React
   let hijacked = false;
 
   function injectPremiumUnlock() {
@@ -308,32 +202,26 @@
           if (mod && typeof mod.z === 'function') {
             const origZ = mod.z;
 
+            // Activar premium en el estado nativo de Suikora
             origZ(true);
 
-            if (ctx.c && modId && ctx.c.has(modId)) {
-              const entry = ctx.c.get(modId);
-              const fakeExports = {
-                z: function () {
-                  origZ(true);
-                },
-                L: function () {
-                  return { known: true, premium: true };
-                }
-              };
-              entry.exports = fakeExports;
-              entry.namespaceObject = fakeExports;
-            }
+            // Proteger mod.z para que cualquier llamada forzada con false siempre permanezca en true
+            mod.z = function () {
+              return origZ(true);
+            };
 
+            // Refuerzo periódico nativo
             setInterval(() => {
               origZ(true);
-            }, 800);
+            }, 1000);
 
+            // Forzar actualización de React en la interfaz
             window.dispatchEvent(new Event('resize'));
             document.dispatchEvent(new Event('visibilitychange'));
 
             hijacked = true;
-            console.log('[Suikora AdShield] ¡Desbloqueo de capítulos y blindaje aplicado con éxito!');
-            showToast('⚡ ¡Capítulos desbloqueados sin anuncios!');
+            console.log('[Suikora AdShield] ¡Desbloqueo permanente aplicado con éxito!');
+            showToast('⚡ Capítulos desbloqueados sin anuncios');
           }
         }
       ]);
@@ -350,6 +238,7 @@
     }
   }
 
+  // Notificación visual en pantalla
   function showToast(text) {
     if (document.getElementById('suikora-adshield-toast')) return;
     const toast = document.createElement('div');
