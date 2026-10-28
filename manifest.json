@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Suikora AdShield & Unlocker",
+  "version": "1.0.0",
+  "description": "Bloquea anuncios invasivos y desbloquea automáticamente los capítulos en Suikora.",
+  "icons": {
+    "128": "icon.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://suikora.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}
